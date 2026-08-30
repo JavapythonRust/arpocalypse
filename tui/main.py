@@ -521,38 +521,35 @@ def aircrack_operation_screen(stdscr):
 # ============================================================
 # CLIENT OPERATION
 # ============================================================
-
 def client_operation_screen(stdscr):
-    """
-    Collect the AP and client entirely from passive scan data.
-
-    The actual disruptive backend operation is intentionally
-    left behind the backend authorization boundary.
-    """
-
-    ap, client = select_target_client(
-        stdscr,
-    )
+    ap, client = select_target_client(stdscr)
 
     if ap is None or client is None:
         return
 
-    message_screen(
-        stdscr,
-        "Selected Target",
-        (
-            f"AP:\n"
-            f"{ap.essid or '<hidden>'}\n"
-            f"{ap.bssid}\n\n"
-            f"Channel: {ap.channel}\n\n"
-            f"Client:\n"
-            f"{client.mac}\n\n"
-            "Parameters collected successfully.\n"
-            "The backend authorization layer must approve\n"
-            "the requested operation before execution."
-        ),
+    bssid = ap.bssid
+    client_mac = client.mac
+    known_clients = ap.clients
+
+
+    result = aircrack.deauth_client(
+        bssid=bssid,
+        client_mac=client_mac,
+        known_clients=known_clients,
     )
 
+    message_screen(
+        stdscr,
+        "Client Operation",
+        (
+            f"AP: {ap.essid or '<hidden>'}\n"
+            f"BSSID: {bssid}\n"
+            f"Channel: {ap.channel}\n"
+            f"Client: {client_mac}\n"
+            f"Known clients: {len(known_clients)}\n\n"
+            f"Backend result: {result}"
+        ),
+    )
 
 # ============================================================
 # COMBINED OPERATION
