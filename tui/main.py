@@ -2,25 +2,24 @@
 ARPocalypse Gremlin TUI
 =======================
 
-Main terminal interface for the Gremlin.
+TUI for the Gremlin.
 
-Current tools:
-    Linux Tools
-        - Nmap
-        - Tcpdump
-        - Aircrack-ng
+The TUI is responsible for:
+    - Navigation
+    - Selecting wireless interfaces
+    - Running passive scans
+    - Selecting discovered APs
+    - Selecting discovered clients
+    - Collecting parameters
+    - Passing parameters to the backend
 
-    Python Tools
-        - None
-
-    Rust Tools
-        - None
-
-Controls:
-    ↑ / ↓       Move through a menu
-    Enter       Select
-    Esc         Go back
-    Q           Quit
+The backend is responsible for:
+    - Validation
+    - Authorization
+    - Privilege checks
+    - Command construction
+    - Process execution
+    - Cleanup
 """
 
 import curses
@@ -38,13 +37,7 @@ LINUX_TOOLS = [
 ]
 
 PYTHON_TOOLS = []
-
 RUST_TOOLS = []
-
-
-# ============================================================
-# MAIN MENU
-# ============================================================
 
 MAIN_MENU = [
     "Linux Tools",
@@ -55,18 +48,13 @@ MAIN_MENU = [
 
 
 # ============================================================
-# DRAW TITLE
+# DRAWING
 # ============================================================
 
 def draw_title(stdscr, title):
-    """Draw a centered title at the top of the screen."""
-
     height, width = stdscr.getmaxyx()
 
-    x = max(
-        0,
-        (width - len(title)) // 2
-    )
+    x = max(0, (width - len(title)) // 2)
 
     stdscr.addstr(
         1,
@@ -76,35 +64,25 @@ def draw_title(stdscr, title):
     )
 
 
-# ============================================================
-# DRAW MENU
-# ============================================================
-
 def draw_menu(stdscr, items, selected):
-    """Draw a vertical menu."""
-
     height, width = stdscr.getmaxyx()
 
     start_y = 4
 
     for index, item in enumerate(items):
-
         x = max(
             0,
-            (width - len(item) - 2) // 2
+            (width - len(item) - 2) // 2,
         )
 
         if index == selected:
-
             stdscr.addstr(
                 start_y + index,
                 x,
                 f"> {item}",
                 curses.A_REVERSE,
             )
-
         else:
-
             stdscr.addstr(
                 start_y + index,
                 x,
@@ -112,13 +90,7 @@ def draw_menu(stdscr, items, selected):
             )
 
 
-# ============================================================
-# DRAW HELP
-# ============================================================
-
 def draw_help(stdscr):
-    """Show the controls at the bottom of the screen."""
-
     height, width = stdscr.getmaxyx()
 
     message = (
@@ -128,7 +100,7 @@ def draw_help(stdscr):
 
     x = max(
         0,
-        (width - len(message)) // 2
+        (width - len(message)) // 2,
     )
 
     stdscr.addstr(
@@ -143,21 +115,11 @@ def draw_help(stdscr):
 # ============================================================
 
 def menu_screen(stdscr, title, items):
-    """
-    Display a menu and return the selected item index.
-
-    Returns:
-        int: Selected item index.
-
-        None: User pressed Esc or selected Back.
-    """
-
     menu_items = list(items) + ["Back"]
 
     selected = 0
 
     while True:
-
         stdscr.clear()
 
         draw_title(
@@ -177,59 +139,36 @@ def menu_screen(stdscr, title, items):
 
         key = stdscr.getch()
 
-        # ----------------------------------------------------
-        # DOWN
-        # ----------------------------------------------------
-
         if key in (
             curses.KEY_DOWN,
             ord("j"),
         ):
-
             selected += 1
 
             if selected >= len(menu_items):
                 selected = 0
 
-        # ----------------------------------------------------
-        # UP
-        # ----------------------------------------------------
-
         elif key in (
             curses.KEY_UP,
             ord("k"),
         ):
-
             selected -= 1
 
             if selected < 0:
                 selected = len(menu_items) - 1
-
-        # ----------------------------------------------------
-        # ENTER
-        # ----------------------------------------------------
 
         elif key in (
             curses.KEY_ENTER,
             10,
             13,
         ):
-
             if selected == len(menu_items) - 1:
                 return None
 
             return selected
 
-        # ----------------------------------------------------
-        # ESC
-        # ----------------------------------------------------
-
         elif key == 27:
             return None
-
-        # ----------------------------------------------------
-        # Q
-        # ----------------------------------------------------
 
         elif key in (
             ord("q"),
@@ -243,10 +182,7 @@ def menu_screen(stdscr, title, items):
 # ============================================================
 
 def message_screen(stdscr, title, message):
-    """Display a message until the user presses a key."""
-
     while True:
-
         stdscr.clear()
 
         draw_title(
@@ -264,16 +200,15 @@ def message_screen(stdscr, title, message):
         )
 
         for index, line in enumerate(lines):
-
             x = max(
                 0,
-                (width - len(line)) // 2
+                (width - len(line)) // 2,
             )
 
             stdscr.addstr(
                 start_y + index,
                 x,
-                line,
+                line[: max(1, width - 1)],
             )
 
         stdscr.addstr(
@@ -291,32 +226,421 @@ def message_screen(stdscr, title, message):
 
 
 # ============================================================
-# GENERIC TOOL SCREEN
+# OBJECT SELECTION
 # ============================================================
 
-def tool_screen(stdscr, tool_name):
-    """Temporary screen for tools without a dedicated UI."""
+def select_ap(stdscr, aps):
+    """
+    Let the user select an AccessPoint returned by
+    aircrack.scan().
+    """
+
+    if not aps:
+        message_screen(
+            stdscr,
+            "Select AP",
+            "No access points were discovered.",
+        )
+        return None
+
+    items = []
+
+    for ap in aps:
+        essid = ap.essid or "<hidden>"
+
+        items.append(
+            f"{essid} | "
+            f"{ap.bssid} | "
+            f"CH {ap.channel} | "
+            f"{ap.power}"
+        )
+
+    selected = menu_screen(
+        stdscr,
+        "Select Access Point",
+        items,
+    )
+
+    if selected is None:
+        return None
+
+    return aps[selected]
+
+
+def select_client(stdscr, ap):
+    """
+    Select one of the clients already associated with
+    the selected AP according to the passive scan.
+    """
+
+    if not ap.clients:
+        message_screen(
+            stdscr,
+            "Select Client",
+            (
+                f"No clients were discovered for\n"
+                f"{ap.essid or '<hidden>'}."
+            ),
+        )
+        return None
+
+    items = [
+        f"{client.mac}"
+        for client in ap.clients
+    ]
+
+    selected = menu_screen(
+        stdscr,
+        "Select Client",
+        items,
+    )
+
+    if selected is None:
+        return None
+
+    return ap.clients[selected]
+
+
+# ============================================================
+# PASSIVE SCAN
+# ============================================================
+
+def run_passive_scan(stdscr):
+    """
+    Run the backend's passive scan and return its results.
+    """
+
+    try:
+        message_screen(
+            stdscr,
+            "Passive Scan",
+            "Starting passive wireless scan...",
+        )
+
+        aps = aircrack.scan(
+            duration=10,
+        )
+
+        return aps
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "Scan Error",
+            str(exc),
+        )
+
+        return None
+
+
+# ============================================================
+# DISPLAY SCAN RESULTS
+# ============================================================
+
+def passive_scan_screen(stdscr):
+    aps = run_passive_scan(stdscr)
+
+    if aps is None:
+        return
+
+    if not aps:
+        message_screen(
+            stdscr,
+            "Passive Scan",
+            "No access points detected.",
+        )
+        return
+
+    lines = [
+        "BSSID              CH   POWER   ENCRYPTION   ESSID",
+        "-" * 65,
+    ]
+
+    for ap in aps:
+        lines.append(
+            f"{ap.bssid:<18} "
+            f"{ap.channel:<4} "
+            f"{ap.power:<7} "
+            f"{ap.encryption:<12} "
+            f"{ap.essid}"
+        )
 
     message_screen(
         stdscr,
-        tool_name,
+        "Passive Wireless Scan",
+        "\n".join(lines),
+    )
+
+
+# ============================================================
+# HANDSHAKE CAPTURE
+# ============================================================
+
+def aircrack_handshake_screen(stdscr):
+    aps = run_passive_scan(stdscr)
+
+    if not aps:
+        return
+
+    ap = select_ap(
+        stdscr,
+        aps,
+    )
+
+    if ap is None:
+        return
+
+    try:
+        result = aircrack.capture_handshake(
+            bssid=ap.bssid,
+            channel=ap.channel,
+        )
+
+        lines = [
+            f"State: {result.state.value}",
+            f"Return code: {result.returncode}",
+            f"Verified: {result.verified}",
+            f"Handshake observed: "
+            f"{result.handshake_captured}",
+        ]
+
+        if result.capture_file:
+            lines.append(
+                f"Capture: {result.capture_file}"
+            )
+
+        if result.error:
+            lines.extend([
+                "",
+                f"Error: {result.error}",
+            ])
+
+        message_screen(
+            stdscr,
+            "Handshake Capture",
+            "\n".join(lines),
+        )
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "Capture Error",
+            str(exc),
+        )
+
+# ============================================================
+# TARGET SELECTION
+# ============================================================
+
+def select_target(stdscr):
+    """
+    Perform a passive scan and collect:
+
+        AccessPoint
+        BSSID
+        channel
+        clients
+    """
+
+    aps = run_passive_scan(stdscr)
+
+    if not aps:
+        return None
+
+    ap = select_ap(
+        stdscr,
+        aps,
+    )
+
+    if ap is None:
+        return None
+
+    return ap
+
+
+# ============================================================
+# CLIENT SELECTION
+# ============================================================
+
+def select_target_client(stdscr):
+    """
+    Perform a passive scan, select an AP, then select one
+    of the clients discovered for that AP.
+    """
+
+    ap = select_target(stdscr)
+
+    if ap is None:
+        return None, None
+
+    client = select_client(
+        stdscr,
+        ap,
+    )
+
+    if client is None:
+        return None, None
+
+    return ap, client
+
+
+# ============================================================
+# OPERATION MENU
+# ============================================================
+
+def aircrack_operation_screen(stdscr):
+    selected = menu_screen(
+        stdscr,
+        "Wireless Operations",
+        [
+            "Listen for Handshakes",
+            "Client Operation",
+            "Combined Operation",
+        ],
+    )
+
+    if selected is None:
+        return
+
+    if selected == 0:
+        aircrack_handshake_screen(
+            stdscr,
+        )
+
+    elif selected == 1:
+        client_operation_screen(
+            stdscr,
+        )
+
+    elif selected == 2:
+        combined_operation_screen(
+            stdscr,
+        )
+
+
+# ============================================================
+# CLIENT OPERATION
+# ============================================================
+
+def client_operation_screen(stdscr):
+    """
+    Collect the AP and client entirely from passive scan data.
+
+    The actual disruptive backend operation is intentionally
+    left behind the backend authorization boundary.
+    """
+
+    ap, client = select_target_client(
+        stdscr,
+    )
+
+    if ap is None or client is None:
+        return
+
+    message_screen(
+        stdscr,
+        "Selected Target",
         (
-            f"{tool_name} interface\n"
-            "\n"
-            "Tool interface will be connected here."
+            f"AP:\n"
+            f"{ap.essid or '<hidden>'}\n"
+            f"{ap.bssid}\n\n"
+            f"Channel: {ap.channel}\n\n"
+            f"Client:\n"
+            f"{client.mac}\n\n"
+            "Parameters collected successfully.\n"
+            "The backend authorization layer must approve\n"
+            "the requested operation before execution."
         ),
     )
 
 
 # ============================================================
-# AIRCRACK TOOL CHECK
+# COMBINED OPERATION
+# ============================================================
+
+def combined_operation_screen(stdscr):
+    """
+    Collect the parameters required by the combined backend API:
+
+        bssid
+        client_mac
+        channel
+        known_clients
+    """
+
+    ap, client = select_target_client(
+        stdscr,
+    )
+
+    if ap is None or client is None:
+        return
+
+    message_screen(
+        stdscr,
+        "Selected Target",
+        (
+            f"AP: {ap.essid or '<hidden>'}\n"
+            f"BSSID: {ap.bssid}\n"
+            f"Channel: {ap.channel}\n\n"
+            f"Client: {client.mac}\n\n"
+            f"Known clients: {len(ap.clients)}\n\n"
+            "Parameters collected successfully.\n"
+            "The backend remains responsible for authorization."
+        ),
+    )
+
+
+# ============================================================
+# AIRCRACK MENU
+# ============================================================
+
+def aircrack_screen(stdscr):
+    while True:
+        selected = menu_screen(
+            stdscr,
+            "Aircrack-ng",
+            [
+                "Check Tools",
+                "Version",
+                "Wireless Interfaces",
+                "Detect Interface",
+                "Monitor Mode",
+                "Passive Wireless Scan",
+                "Wireless Operations",
+            ],
+        )
+
+        if selected is None:
+            return
+
+        if selected == 0:
+            aircrack_tools_screen(stdscr)
+
+        elif selected == 1:
+            aircrack_version_screen(stdscr)
+
+        elif selected == 2:
+            aircrack_interfaces_screen(stdscr)
+
+        elif selected == 3:
+            aircrack_detect_interface_screen(stdscr)
+
+        elif selected == 4:
+            aircrack_monitor_screen(stdscr)
+
+        elif selected == 5:
+            passive_scan_screen(stdscr)
+
+        elif selected == 6:
+            aircrack_operation_screen(stdscr)
+
+
+# ============================================================
+# AIRCRACK INFORMATION SCREENS
 # ============================================================
 
 def aircrack_tools_screen(stdscr):
-    """Display discovered Aircrack-ng dependencies."""
-
     try:
-
         tools = aircrack.find_tools()
 
         lines = [
@@ -339,23 +663,15 @@ def aircrack_tools_screen(stdscr):
         )
 
     except Exception as exc:
-
         message_screen(
             stdscr,
             "Aircrack Error",
-            f"Unable to check tools:\n\n{exc}",
+            str(exc),
         )
 
 
-# ============================================================
-# AIRCRACK VERSION
-# ============================================================
-
 def aircrack_version_screen(stdscr):
-    """Display the installed Aircrack-ng version."""
-
     try:
-
         version = aircrack.version()
 
         message_screen(
@@ -365,7 +681,6 @@ def aircrack_version_screen(stdscr):
         )
 
     except Exception as exc:
-
         message_screen(
             stdscr,
             "Aircrack Error",
@@ -373,27 +688,19 @@ def aircrack_version_screen(stdscr):
         )
 
 
-# ============================================================
-# WIRELESS INTERFACES
-# ============================================================
-
 def aircrack_interfaces_screen(stdscr):
-    """Display available wireless interfaces."""
-
     try:
-
         interfaces = aircrack.list_interfaces()
 
         if interfaces:
-
             message = (
                 "Wireless Interfaces\n\n"
                 + "\n".join(interfaces)
             )
-
         else:
-
-            message = "No wireless interfaces detected."
+            message = (
+                "No wireless interfaces detected."
+            )
 
         message_screen(
             stdscr,
@@ -402,7 +709,6 @@ def aircrack_interfaces_screen(stdscr):
         )
 
     except Exception as exc:
-
         message_screen(
             stdscr,
             "Aircrack Error",
@@ -410,15 +716,8 @@ def aircrack_interfaces_screen(stdscr):
         )
 
 
-# ============================================================
-# DETECT INTERFACE
-# ============================================================
-
 def aircrack_detect_interface_screen(stdscr):
-    """Automatically detect a wireless interface."""
-
     try:
-
         interface = aircrack.detect_interface()
 
         message_screen(
@@ -428,7 +727,6 @@ def aircrack_detect_interface_screen(stdscr):
         )
 
     except Exception as exc:
-
         message_screen(
             stdscr,
             "Aircrack Error",
@@ -436,23 +734,12 @@ def aircrack_detect_interface_screen(stdscr):
         )
 
 
-# ============================================================
-# MONITOR MODE
-# ============================================================
-
 def aircrack_monitor_screen(stdscr):
-    """
-    Monitor-mode interface.
-
-    The backend owns the actual monitor-mode lifecycle.
-    """
-
     try:
-
         interface = aircrack.detect_interface()
 
         session = aircrack.start_monitor(
-            interface
+            interface,
         )
 
         message_screen(
@@ -466,11 +753,10 @@ def aircrack_monitor_screen(stdscr):
         )
 
         aircrack.stop_monitor(
-            session
+            session,
         )
 
     except Exception as exc:
-
         message_screen(
             stdscr,
             "Monitor Mode Error",
@@ -479,245 +765,11 @@ def aircrack_monitor_screen(stdscr):
 
 
 # ============================================================
-# PASSIVE WIRELESS SCAN
-# ============================================================
-
-def aircrack_scan_screen(stdscr):
-    """Perform a passive wireless scan."""
-
-    try:
-
-        aps = aircrack.scan(
-            duration=10
-        )
-
-        if not aps:
-
-            message = "No access points detected."
-
-        else:
-
-            lines = [
-                "BSSID              CH  POWER  ENCRYPTION  ESSID",
-                "-" * 60,
-            ]
-
-            for ap in aps:
-
-                lines.append(
-                    f"{ap.bssid:<18} "
-                    f"{ap.channel:<3} "
-                    f"{ap.power:<6} "
-                    f"{ap.encryption:<11} "
-                    f"{ap.essid}"
-                )
-
-            message = "\n".join(lines)
-
-        message_screen(
-            stdscr,
-            "Passive Wireless Scan",
-            message,
-        )
-
-    except Exception as exc:
-
-        message_screen(
-            stdscr,
-            "Scan Error",
-            str(exc),
-        )
-
-
-# ============================================================
-# AIRCRACK OPERATION MENU
-# ============================================================
-
-def aircrack_operation_screen(stdscr):
-    """
-    Select an Aircrack-ng wireless operation.
-
-    The backend remains responsible for validating and
-    authorizing the requested operation.
-    """
-
-    selected = menu_screen(
-        stdscr,
-        "Wireless Operations",
-        [
-            "Listen for Handshakes",
-            "Send Deauth",
-            "Both",
-        ],
-    )
-
-    if selected is None:
-        return
-
-    if selected == 0:
-
-        aircrack_handshake_screen(
-            stdscr
-        )
-
-    elif selected == 1:
-
-        aircrack_deauth_screen(
-            stdscr
-        )
-
-    elif selected == 2:
-
-        aircrack_deauth_capture_screen(
-            stdscr
-        )
-
-
-# ============================================================
-# HANDSHAKE CAPTURE
-# ============================================================
-
-def aircrack_handshake_screen(stdscr):
-    """
-    UI entry point for handshake capture.
-
-    Target parameters should be supplied through the backend's
-    validated interface rather than constructed in the TUI.
-    """
-
-    message_screen(
-        stdscr,
-        "Listen for Handshakes",
-        (
-            "Handshake capture selected.\n\n"
-            "Connect this screen to your validated backend\n"
-            "target-selection workflow."
-        ),
-    )
-
-
-# ============================================================
-# DEAUTH
-# ============================================================
-
-def aircrack_deauth_screen(stdscr):
-    """
-    UI entry point for deauthentication.
-
-    Authorization and safety enforcement belong in the backend.
-    """
-
-    message_screen(
-        stdscr,
-        "Send Deauth",
-        (
-            "Deauthentication selected.\n\n"
-            "The backend must perform its authorization and\n"
-            "safety checks before executing the operation."
-        ),
-    )
-
-
-# ============================================================
-# DEAUTH + CAPTURE
-# ============================================================
-
-def aircrack_deauth_capture_screen(stdscr):
-    """
-    UI entry point for the combined operation.
-
-    Authorization and safety enforcement belong in the backend.
-    """
-
-    message_screen(
-        stdscr,
-        "Deauth + Capture",
-        (
-            "Combined deauthentication + capture selected.\n\n"
-            "The backend must perform its authorization and\n"
-            "safety checks before executing the operation."
-        ),
-    )
-
-
-# ============================================================
-# AIRCRACK MENU
-# ============================================================
-
-def aircrack_screen(stdscr):
-    """Display the Aircrack-ng interface."""
-
-    while True:
-
-        selected = menu_screen(
-            stdscr,
-            "Aircrack-ng",
-            [
-                "Check Tools",
-                "Version",
-                "Wireless Interfaces",
-                "Detect Interface",
-                "Monitor Mode",
-                "Passive Wireless Scan",
-                "Wireless Operations",
-            ],
-        )
-
-        if selected is None:
-            return
-
-        if selected == 0:
-
-            aircrack_tools_screen(
-                stdscr
-            )
-
-        elif selected == 1:
-
-            aircrack_version_screen(
-                stdscr
-            )
-
-        elif selected == 2:
-
-            aircrack_interfaces_screen(
-                stdscr
-            )
-
-        elif selected == 3:
-
-            aircrack_detect_interface_screen(
-                stdscr
-            )
-
-        elif selected == 4:
-
-            aircrack_monitor_screen(
-                stdscr
-            )
-
-        elif selected == 5:
-
-            aircrack_scan_screen(
-                stdscr
-            )
-
-        elif selected == 6:
-
-            aircrack_operation_screen(
-                stdscr
-            )
-
-
-# ============================================================
-# LINUX TOOLS MENU
+# LINUX TOOLS
 # ============================================================
 
 def linux_tools_screen(stdscr):
-    """Display Linux tools."""
-
     while True:
-
         selected = menu_screen(
             stdscr,
             "Linux Tools",
@@ -728,65 +780,47 @@ def linux_tools_screen(stdscr):
             return
 
         if LINUX_TOOLS[selected] == "Aircrack-ng":
-
-            aircrack_screen(
-                stdscr
-            )
+            aircrack_screen(stdscr)
 
         else:
-
-            tool_screen(
+            message_screen(
                 stdscr,
                 LINUX_TOOLS[selected],
+                (
+                    f"{LINUX_TOOLS[selected]} interface\n\n"
+                    "Not implemented yet."
+                ),
             )
 
 
 # ============================================================
-# PYTHON TOOLS MENU
+# PYTHON TOOLS
 # ============================================================
 
 def python_tools_screen(stdscr):
-    """Display Python tools."""
+    selected = menu_screen(
+        stdscr,
+        "Python Tools",
+        PYTHON_TOOLS,
+    )
 
-    while True:
-
-        selected = menu_screen(
-            stdscr,
-            "Python Tools",
-            PYTHON_TOOLS,
-        )
-
-        if selected is None:
-            return
-
-        tool_screen(
-            stdscr,
-            PYTHON_TOOLS[selected],
-        )
+    if selected is None:
+        return
 
 
 # ============================================================
-# RUST TOOLS MENU
+# RUST TOOLS
 # ============================================================
 
 def rust_tools_screen(stdscr):
-    """Display Rust tools."""
+    selected = menu_screen(
+        stdscr,
+        "Rust Tools",
+        RUST_TOOLS,
+    )
 
-    while True:
-
-        selected = menu_screen(
-            stdscr,
-            "Rust Tools",
-            RUST_TOOLS,
-        )
-
-        if selected is None:
-            return
-
-        tool_screen(
-            stdscr,
-            RUST_TOOLS[selected],
-        )
+    if selected is None:
+        return
 
 
 # ============================================================
@@ -794,12 +828,9 @@ def rust_tools_screen(stdscr):
 # ============================================================
 
 def main_menu(stdscr):
-    """Run the main Gremlin menu."""
-
     selected = 0
 
     while True:
-
         stdscr.clear()
 
         draw_title(
@@ -819,88 +850,54 @@ def main_menu(stdscr):
 
         key = stdscr.getch()
 
-        # ----------------------------------------------------
-        # DOWN
-        # ----------------------------------------------------
-
         if key in (
             curses.KEY_DOWN,
             ord("j"),
         ):
-
             selected += 1
 
             if selected >= len(MAIN_MENU):
                 selected = 0
 
-        # ----------------------------------------------------
-        # UP
-        # ----------------------------------------------------
-
         elif key in (
             curses.KEY_UP,
             ord("k"),
         ):
-
             selected -= 1
 
             if selected < 0:
                 selected = len(MAIN_MENU) - 1
-
-        # ----------------------------------------------------
-        # ENTER
-        # ----------------------------------------------------
 
         elif key in (
             curses.KEY_ENTER,
             10,
             13,
         ):
-
             if selected == 0:
-
-                linux_tools_screen(
-                    stdscr
-                )
+                linux_tools_screen(stdscr)
 
             elif selected == 1:
-
-                python_tools_screen(
-                    stdscr
-                )
+                python_tools_screen(stdscr)
 
             elif selected == 2:
-
-                rust_tools_screen(
-                    stdscr
-                )
+                rust_tools_screen(stdscr)
 
             elif selected == 3:
-
                 break
-
-        # ----------------------------------------------------
-        # Q = QUIT
-        # ----------------------------------------------------
 
         elif key in (
             ord("q"),
             ord("Q"),
         ):
-
             break
 
 
 # ============================================================
-# PROGRAM ENTRY POINT
+# ENTRY POINT
 # ============================================================
 
 def main():
-    """Start the Gremlin TUI."""
-
-    curses.wrapper(
-        main_menu
-    )
+    curses.wrapper(main_menu)
 
 
 if __name__ == "__main__":
