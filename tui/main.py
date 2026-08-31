@@ -3,27 +3,22 @@ ARPocalypse Gremlin TUI
 =======================
 
 TUI for the Gremlin.
-
-The TUI is responsible for:
-    - Navigation
-    - Selecting wireless interfaces
-    - Running passive scans
-    - Selecting discovered APs
-    - Selecting discovered clients
-    - Collecting parameters
-    - Passing parameters to the backend
-
-The backend is responsible for:
-    - Validation
-    - Authorization
-    - Privilege checks
-    - Command construction
-    - Process execution
-    - Cleanup
 """
 
 import curses
+from pathlib import Path
+
 import aircrack
+from hid_keyboard import HIDKeyboard
+from macro_parser import MacroParser
+
+
+# ============================================================
+# PATHS
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent
+MACROS_DIR = BASE_DIR / "macros"
 
 
 # ============================================================
@@ -43,6 +38,7 @@ MAIN_MENU = [
     "Linux Tools",
     "Python Tools",
     "Rust Tools",
+    "HID",
     "Exit",
 ]
 
@@ -200,13 +196,18 @@ def message_screen(stdscr, title, message):
         )
 
         for index, line in enumerate(lines):
+            y = start_y + index
+
+            if y < 0 or y >= height - 2:
+                continue
+
             x = max(
                 0,
                 (width - len(line)) // 2,
             )
 
             stdscr.addstr(
-                start_y + index,
+                y,
                 x,
                 line[: max(1, width - 1)],
             )
@@ -230,11 +231,6 @@ def message_screen(stdscr, title, message):
 # ============================================================
 
 def select_ap(stdscr, aps):
-    """
-    Let the user select an AccessPoint returned by
-    aircrack.scan().
-    """
-
     if not aps:
         message_screen(
             stdscr,
@@ -268,11 +264,6 @@ def select_ap(stdscr, aps):
 
 
 def select_client(stdscr, ap):
-    """
-    Select one of the clients already associated with
-    the selected AP according to the passive scan.
-    """
-
     if not ap.clients:
         message_screen(
             stdscr,
@@ -306,10 +297,6 @@ def select_client(stdscr, ap):
 # ============================================================
 
 def run_passive_scan(stdscr):
-    """
-    Run the backend's passive scan and return its results.
-    """
-
     try:
         message_screen(
             stdscr,
@@ -332,10 +319,6 @@ def run_passive_scan(stdscr):
 
         return None
 
-
-# ============================================================
-# DISPLAY SCAN RESULTS
-# ============================================================
 
 def passive_scan_screen(stdscr):
     aps = run_passive_scan(stdscr)
@@ -428,20 +411,12 @@ def aircrack_handshake_screen(stdscr):
             str(exc),
         )
 
+
 # ============================================================
 # TARGET SELECTION
 # ============================================================
 
 def select_target(stdscr):
-    """
-    Perform a passive scan and collect:
-
-        AccessPoint
-        BSSID
-        channel
-        clients
-    """
-
     aps = run_passive_scan(stdscr)
 
     if not aps:
@@ -458,16 +433,7 @@ def select_target(stdscr):
     return ap
 
 
-# ============================================================
-# CLIENT SELECTION
-# ============================================================
-
 def select_target_client(stdscr):
-    """
-    Perform a passive scan, select an AP, then select one
-    of the clients discovered for that AP.
-    """
-
     ap = select_target(stdscr)
 
     if ap is None:
@@ -521,6 +487,7 @@ def aircrack_operation_screen(stdscr):
 # ============================================================
 # CLIENT OPERATION
 # ============================================================
+
 def client_operation_screen(stdscr):
     ap, client = select_target_client(stdscr)
 
@@ -530,7 +497,6 @@ def client_operation_screen(stdscr):
     bssid = ap.bssid
     client_mac = client.mac
     known_clients = ap.clients
-
 
     result = aircrack.deauth_client(
         bssid=bssid,
@@ -551,20 +517,12 @@ def client_operation_screen(stdscr):
         ),
     )
 
+
 # ============================================================
 # COMBINED OPERATION
 # ============================================================
 
 def combined_operation_screen(stdscr):
-    """
-    Collect the parameters required by the combined backend API:
-
-        bssid
-        client_mac
-        channel
-        known_clients
-    """
-
     ap, client = select_target_client(
         stdscr,
     )
@@ -821,6 +779,378 @@ def rust_tools_screen(stdscr):
 
 
 # ============================================================
+# HID
+# ============================================================
+
+def hid_status_screen(stdscr):
+    keyboard = HIDKeyboard()
+
+    try:
+        keyboard.check_device()
+
+        message_screen(
+            stdscr,
+            "HID Status",
+            (
+                "HID device: AVAILABLE\n\n"
+                f"Device: {keyboard.device}"
+            ),
+        )
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "HID Status",
+            (
+                "HID device: NOT AVAILABLE\n\n"
+                f"Device: {keyboard.device}\n\n"
+                f"Error: {exc}"
+            ),
+        )
+
+
+def hid_type_screen(stdscr):
+    keyboard = HIDKeyboard()
+
+    try:
+        keyboard.check_device()
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "HID Error",
+            str(exc),
+        )
+        return
+
+    stdscr.clear()
+
+    draw_title(
+        stdscr,
+        "HID Type Text",
+    )
+
+    height, width = stdscr.getmaxyx()
+
+    stdscr.addstr(
+        4,
+        2,
+        "Enter text to type:",
+    )
+
+    curses.echo()
+
+    try:
+        text = stdscr.getstr(
+            6,
+            2,
+            max(1, width - 5),
+        ).decode(
+            "utf-8",
+            errors="replace",
+        )
+
+    finally:
+        curses.noecho()
+
+    if not text:
+        return
+
+    try:
+        keyboard.type_text(text)
+
+        message_screen(
+            stdscr,
+            "HID",
+            "Text sent successfully.",
+        )
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "HID Error",
+            str(exc),
+        )
+
+
+def hid_key_screen(stdscr):
+    keyboard = HIDKeyboard()
+
+    try:
+        keyboard.check_device()
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "HID Error",
+            str(exc),
+        )
+        return
+
+    keys = [
+        "ENTER",
+        "ESC",
+        "BACKSPACE",
+        "TAB",
+        "SPACE",
+        "CAPSLOCK",
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+        "F6",
+        "F7",
+        "F8",
+        "F9",
+        "F10",
+        "F11",
+        "F12",
+        "HOME",
+        "END",
+        "DELETE",
+        "INSERT",
+        "UP",
+        "DOWN",
+        "LEFT",
+        "RIGHT",
+        "PAGEUP",
+        "PAGEDOWN",
+    ]
+
+    selected = menu_screen(
+        stdscr,
+        "HID Key",
+        keys,
+    )
+
+    if selected is None:
+        return
+
+    key = keys[selected]
+
+    try:
+        keyboard.press_key(key)
+
+        message_screen(
+            stdscr,
+            "HID",
+            f"Sent key: {key}",
+        )
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "HID Error",
+            str(exc),
+        )
+
+
+def hid_hotkey_screen(stdscr):
+    keyboard = HIDKeyboard()
+
+    try:
+        keyboard.check_device()
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "HID Error",
+            str(exc),
+        )
+        return
+
+    stdscr.clear()
+
+    draw_title(
+        stdscr,
+        "HID Hotkey",
+    )
+
+    height, width = stdscr.getmaxyx()
+
+    stdscr.addstr(
+        4,
+        2,
+        "Enter hotkey (example: CTRL+ALT+T):",
+    )
+
+    curses.echo()
+
+    try:
+        value = stdscr.getstr(
+            6,
+            2,
+            max(1, width - 5),
+        ).decode(
+            "utf-8",
+            errors="replace",
+        )
+
+    finally:
+        curses.noecho()
+
+    if not value:
+        return
+
+    keys = [
+        key.strip()
+        for key in value.split("+")
+    ]
+
+    try:
+        keyboard.hotkey(keys)
+
+        message_screen(
+            stdscr,
+            "HID",
+            f"Sent hotkey: {value}",
+        )
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "HID Error",
+            str(exc),
+        )
+
+
+def find_macros():
+    """
+    Find all .txt files in the macros directory.
+
+    The directory is scanned every time this function
+    is called, so newly added macros appear automatically.
+    """
+
+    if not MACROS_DIR.exists():
+        return []
+
+    if not MACROS_DIR.is_dir():
+        return []
+
+    return sorted(
+        (
+            path
+            for path in MACROS_DIR.iterdir()
+            if path.is_file()
+            and path.suffix.lower() == ".txt"
+        ),
+        key=lambda path: path.name.lower(),
+    )
+
+
+def hid_macro_screen(stdscr):
+    """
+    Display macros found in macros/*.txt and execute
+    the selected macro through MacroParser.
+    """
+
+    macros = find_macros()
+
+    if not macros:
+        message_screen(
+            stdscr,
+            "HID Macros",
+            (
+                "No macro files found.\n\n"
+                f"Macro directory:\n"
+                f"{MACROS_DIR}\n\n"
+                "Add .txt files to this directory."
+            ),
+        )
+        return
+
+    items = [
+        macro.name
+        for macro in macros
+    ]
+
+    selected = menu_screen(
+        stdscr,
+        "HID Macros",
+        items,
+    )
+
+    if selected is None:
+        return
+
+    macro_file = macros[selected]
+
+    keyboard = HIDKeyboard()
+
+    try:
+        keyboard.check_device()
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "HID Error",
+            str(exc),
+        )
+        return
+
+    parser = MacroParser(keyboard)
+
+    try:
+        parser.run_file(
+            str(macro_file)
+        )
+
+        message_screen(
+            stdscr,
+            "Macro Complete",
+            (
+                f"Macro:\n{macro_file.name}\n\n"
+                "Macro finished successfully."
+            ),
+        )
+
+    except Exception as exc:
+        message_screen(
+            stdscr,
+            "Macro Error",
+            (
+                f"Macro: {macro_file.name}\n\n"
+                f"{exc}"
+            ),
+        )
+
+
+def hid_screen(stdscr):
+    while True:
+        selected = menu_screen(
+            stdscr,
+            "USB HID",
+            [
+                "HID Status",
+                "Type Text",
+                "Press Key",
+                "Hotkey",
+                "Run Macro",
+            ],
+        )
+
+        if selected is None:
+            return
+
+        if selected == 0:
+            hid_status_screen(stdscr)
+
+        elif selected == 1:
+            hid_type_screen(stdscr)
+
+        elif selected == 2:
+            hid_key_screen(stdscr)
+
+        elif selected == 3:
+            hid_hotkey_screen(stdscr)
+
+        elif selected == 4:
+            hid_macro_screen(stdscr)
+
+
+# ============================================================
 # MAIN MENU
 # ============================================================
 
@@ -880,6 +1210,9 @@ def main_menu(stdscr):
                 rust_tools_screen(stdscr)
 
             elif selected == 3:
+                hid_screen(stdscr)
+
+            elif selected == 4:
                 break
 
         elif key in (
