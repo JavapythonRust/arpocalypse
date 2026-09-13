@@ -3,7 +3,7 @@
 import sys
 import time
 
-from hid_keyboard import HIDKeyboard
+from .hid_keyboard import HIDKeyboard
 
 
 class MacroParser:
