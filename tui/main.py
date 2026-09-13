@@ -4,14 +4,12 @@ ARPocalypse Gremlin TUI
 
 TUI for the Gremlin.
 """
-
 import curses
 from pathlib import Path
 
-import aircrack
-from hid_keyboard import HIDKeyboard
-from macro_parser import MacroParser
-
+from tools import aircrack
+from tools.hid_keyboard import HIDKeyboard
+from tools.macro_parser import MacroParser
 
 # ============================================================
 # PATHS
