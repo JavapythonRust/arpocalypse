@@ -4,21 +4,28 @@ ARPocalypse Gremlin TUI
 
 TUI for the Gremlin.
 """
+
+import sys
 import curses
 from pathlib import Path
-
-from tools import aircrack
-from tools.hid_keyboard import HIDKeyboard
-from tools.macro_parser import MacroParser
 
 # ============================================================
 # PATHS
 # ============================================================
 
-BASE_DIR = Path(__file__).resolve().parent
+# main.py is in arpocalypse/tui/
+# parent.parent is therefore the arpocalypse repository root.
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Make the repository root importable.
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+from tools.python import aircrack
+from tools.python.hid_keyboard import HIDKeyboard
+from tools.python.macro_parser import MacroParser
+
 MACROS_DIR = BASE_DIR / "macros"
-
-
 # ============================================================
 # TOOL CATEGORIES
 # ============================================================
